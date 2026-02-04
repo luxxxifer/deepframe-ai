@@ -10,8 +10,8 @@ COMFY_URL = "http://127.0.0.1:8188"
 def handler(job):
     # 1. Получаем входные данные из запроса API
     job_input = job['input']
-    # По умолчанию используем промпт из запроса, если его нет - стандартную фразу
-    user_prompt = job_input.get("prompt", "nude elf woman in forest")
+    # Получаем промпт от пользователя. Если его нет в запросе, берем заглушку.
+    user_prompt = job_input.get("prompt", "elf woman in forest, masterpiece")
     
     # 2. Загружаем ваш воркфлоу
     try:
@@ -20,14 +20,20 @@ def handler(job):
     except Exception as e:
         return {"error": f"Failed to load workflow_api.json: {str(e)}"}
 
-    # 3. Модифицируем воркфлоу под запрос пользователя
-    # Согласно вашему JSON, узел "197" содержит текст "PROMT HERE"
-    if "197" in workflow:
-        workflow["197"]["inputs"]["value"] = user_prompt
+    # 3. Модифицируем воркфлоу под ТВОЙ JSON
+    # В твоем файле за промпт отвечает узел "27" (StringConcatenate)
+    # Текст промпта вставляем в поле "string_b"
+    if "27" in workflow:
+        workflow["27"]["inputs"]["string_b"] = user_prompt
+        print(f"Prompt set to node 27: {user_prompt}")
+    else:
+        return {"error": "Node 27 not found in workflow. Check your JSON file."}
     
-    # Дополнительно: если вы хотите менять Seed через API
-    if "70" in workflow and "seed" in job_input:
-        workflow["70"]["inputs"]["value"] = job_input["seed"]
+    # Меняем Seed (узел 70), чтобы картинки каждый раз были разными
+    if "70" in workflow:
+        new_seed = job_input.get("seed", int(time.time()))
+        workflow["70"]["inputs"]["value"] = new_seed
+        print(f"Seed set to node 70: {new_seed}")
 
     # 4. Отправляем запрос в ComfyUI
     payload = {
@@ -36,25 +42,25 @@ def handler(job):
     }
     
     try:
-        # Отправляем задачу в очередь
+        # Отправляем задачу в очередь ComfyUI
         response = requests.post(f"{COMFY_URL}/prompt", json=payload)
         response.raise_for_status()
         prompt_id = response.json().get('prompt_id')
         
-        # 5. Ожидание завершения (простой цикл опроса)
-        # В идеале здесь должна быть проверка через WebSocket, но для начала хватит и этого
+        # 5. Ожидание завершения
+        print(f"Job sent, prompt_id: {prompt_id}. Waiting for completion...")
         while True:
             history_resp = requests.get(f"{COMFY_URL}/history/{prompt_id}")
             history = history_resp.json()
             
             if prompt_id in history:
-                # Генерация завершена
+                # Генерация завершена!
                 break
             time.sleep(1)
             
         return {
             "status": "success",
-            "message": "Image generated",
+            "message": "Image generated successfully",
             "prompt_id": prompt_id
         }
         
