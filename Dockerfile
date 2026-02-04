@@ -2,10 +2,20 @@
 FROM timpietruskyblibla/runpod-worker-comfy:3.4.0-base
 
 WORKDIR /
+
+# --- УСТАНОВКА КАСТОМНЫХ НОД ---
+# Клонируем репозитории напрямую в папку custom_nodes образа
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git && \
+    git clone https://github.com/theUpsider/ComfyUI-Logic.git && \
+    git clone https://github.com/ltdrdata/ComfyUI-Manager.git
+
+# Устанавливаем зависимости для самих нод (если они есть)
+RUN if [ -f /comfyui/custom_nodes/ComfyUI-Custom-Scripts/requirements.txt ]; then pip install -r /comfyui/custom_nodes/ComfyUI-Custom-Scripts/requirements.txt; fi
+
 COPY . .
 
-# Устанавливаем зависимости
+# Твои зависимости для бота
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Команда запуска (используем стандартный старт-скрипт образа)
 CMD ["/start.sh"]
