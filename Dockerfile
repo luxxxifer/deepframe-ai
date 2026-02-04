@@ -1,5 +1,5 @@
 # Используем стабильную версию образа
-FROM runpod/worker-comfyui:5.6.0
+FROM runpod/worker-comfyui:latest
 
 WORKDIR /
 COPY . .
