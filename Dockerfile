@@ -18,7 +18,7 @@ RUN if [ -f /comfyui/custom_nodes/ComfyUI-Custom-Scripts/requirements.txt ]; the
 
 COPY . .
 
-# Твои зависимости для бота
+# Твои зависимости для ботаа
 RUN pip install --no-cache-dir -r requirements.txt
 
 CMD ["/start.sh"]
