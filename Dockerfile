@@ -1,5 +1,5 @@
 # Используем стабильную версию образа
-FROM runpod/ai-worker-comfyui:latest
+FROM timpietruskyblibla/runpod-worker-comfy:3.4.0-base
 
 WORKDIR /
 COPY . .
