@@ -5,7 +5,10 @@ WORKDIR /
 
 # --- УСТАНОВКА КАСТОМНЫХ НОД ---
 # Клонируем репозитории напрямую в папку custom_nodes образа
-RUN cd /comfyui/custom_nodes && \
+# Устанавливаем git, создаем папку и клонируем ноды
+RUN apt-get update && apt-get install -y git && \
+    mkdir -p /comfyui/custom_nodes && \
+    cd /comfyui/custom_nodes && \
     git clone https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git && \
     git clone https://github.com/theUpsider/ComfyUI-Logic.git && \
     git clone https://github.com/ltdrdata/ComfyUI-Manager.git
