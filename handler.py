@@ -1,71 +1,136 @@
 import runpod
 import requests
-import json
 import time
-import os
+import base64
+from urllib.parse import urlencode
 
-# Настройки адреса ComfyUI
 COMFY_URL = "http://127.0.0.1:8188"
 
-def handler(job):
-    # 1. Получаем входные данные из запроса API
-    job_input = job['input']
-    # Получаем промпт от пользователя. Если его нет в запросе, берем заглушку.
-    user_prompt = job_input.get("prompt", "elf woman in forest, masterpiece")
-    
-    # 2. Загружаем ваш воркфлоу
-    try:
-        with open('workflow_api.json', 'r') as f:
-            workflow = json.load(f)
-    except Exception as e:
-        return {"error": f"Failed to load workflow_api.json: {str(e)}"}
+# сколько максимум ждать одну генерацию (сек)
+MAX_WAIT_SEC = 300
+POLL_INTERVAL = 1.0
 
-    # 3. Модифицируем воркфлоу под ТВОЙ JSON
-    # В твоем файле за промпт отвечает узел "27" (StringConcatenate)
-    # Текст промпта вставляем в поле "string_b"
-    if "27" in workflow:
-        workflow["27"]["inputs"]["string_b"] = user_prompt
-        print(f"Prompt set to node 27: {user_prompt}")
-    else:
-        return {"error": "Node 27 not found in workflow. Check your JSON file."}
-    
-    # Меняем Seed (узел 70), чтобы картинки каждый раз были разными
-    if "70" in workflow:
-        new_seed = job_input.get("seed", int(time.time()))
-        workflow["70"]["inputs"]["value"] = new_seed
-        print(f"Seed set to node 70: {new_seed}")
-
-    # 4. Отправляем запрос в ComfyUI
+def _comfy_post_prompt(workflow: dict) -> str:
     payload = {
         "prompt": workflow,
-        "client_id": "runpod_api"
+        "client_id": "runpod_serverless"
     }
-    
+    r = requests.post(f"{COMFY_URL}/prompt", json=payload, timeout=60)
+    r.raise_for_status()
+    data = r.json()
+    prompt_id = data.get("prompt_id")
+    if not prompt_id:
+        raise RuntimeError(f"comfy returned no prompt_id: {data}")
+    return prompt_id
+
+def _comfy_get_history(prompt_id: str) -> dict:
+    r = requests.get(f"{COMFY_URL}/history/{prompt_id}", timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+def _extract_images_from_history(history: dict, prompt_id: str) -> list[dict]:
+    """
+    Возвращает список объектов вида:
+    {"filename": "...", "subfolder": "...", "type": "output"}
+    """
+    if prompt_id not in history:
+        return []
+
+    item = history[prompt_id]
+    outputs = item.get("outputs", {})
+    images = []
+
+    for _node_id, node_out in outputs.items():
+        for img in node_out.get("images", []) or []:
+            # comfy обычно отдаёт filename/subfolder/type
+            fn = img.get("filename")
+            if not fn:
+                continue
+            images.append({
+                "filename": fn,
+                "subfolder": img.get("subfolder", ""),
+                "type": img.get("type", "output"),
+            })
+
+    return images
+
+def _download_comfy_image(meta: dict) -> bytes:
+    # /view?filename=...&subfolder=...&type=...
+    query = urlencode({
+        "filename": meta["filename"],
+        "subfolder": meta.get("subfolder", ""),
+        "type": meta.get("type", "output")
+    })
+    url = f"{COMFY_URL}/view?{query}"
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    return r.content
+
+def handler(job):
     try:
-        # Отправляем задачу в очередь ComfyUI
-        response = requests.post(f"{COMFY_URL}/prompt", json=payload)
-        response.raise_for_status()
-        prompt_id = response.json().get('prompt_id')
-        
-        # 5. Ожидание завершения
-        print(f"Job sent, prompt_id: {prompt_id}. Waiting for completion...")
-        while True:
-            history_resp = requests.get(f"{COMFY_URL}/history/{prompt_id}")
-            history = history_resp.json()
-            
-            if prompt_id in history:
-                # Генерация завершена!
+        job_input = job.get("input") or {}
+        workflow = job_input.get("workflow")
+
+        if not isinstance(workflow, dict):
+            return {
+                "error": "missing_or_invalid_workflow",
+                "message": "expected job.input.workflow to be an object (dict)"
+            }
+
+        # 1) отправляем граф в ComfyUI
+        prompt_id = _comfy_post_prompt(workflow)
+
+        # 2) ждём появления в history
+        t0 = time.time()
+        images_meta = []
+
+        while time.time() - t0 < MAX_WAIT_SEC:
+            history = _comfy_get_history(prompt_id)
+            images_meta = _extract_images_from_history(history, prompt_id)
+            # если outputs появились, но картинок ещё нет — подождём чуть
+            if prompt_id in history and history[prompt_id].get("outputs") is not None and images_meta:
                 break
-            time.sleep(1)
-            
+            time.sleep(POLL_INTERVAL)
+
+        if not images_meta:
+            # попробуем вернуть полезную диагностику
+            history = _comfy_get_history(prompt_id)
+            item = history.get(prompt_id, {})
+            return {
+                "error": "no_images",
+                "message": "workflow executed but produced no images (or timed out)",
+                "prompt_id": prompt_id,
+                "history_keys": list(item.keys())
+            }
+
+        # 3) скачиваем картинки и возвращаем base64
+        out_images = []
+        for meta in images_meta:
+            img_bytes = _download_comfy_image(meta)
+            out_images.append({
+                "filename": meta["filename"],
+                "mime": "image/png",
+                "data_base64": base64.b64encode(img_bytes).decode("utf-8")
+            })
+
         return {
             "status": "success",
-            "message": "Image generated successfully",
-            "prompt_id": prompt_id
+            "prompt_id": prompt_id,
+            "images": out_images
         }
-        
-    except Exception as e:
-        return {"error": f"Execution failed: {str(e)}"}
 
-# Запуск обработчика RunPod
+    except requests.HTTPError as e:
+        # покажем тело ответа, если есть
+        try:
+            body = e.response.text
+        except Exception:
+            body = None
+        return {
+            "error": "http_error",
+            "message": str(e),
+            "response_body": body
+        }
+    except Exception as e:
+        return {"error": "exception", "message": str(e)}
+
 runpod.serverless.start({"handler": handler})
