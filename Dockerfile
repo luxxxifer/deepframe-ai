@@ -10,8 +10,7 @@ RUN apt-get update && apt-get install -y git && \
     mkdir -p /comfyui/custom_nodes && \
     cd /comfyui/custom_nodes && \
     git clone https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git && \
-    git clone https://github.com/theUpsider/ComfyUI-Logic.git && \
-    git clone https://github.com/ltdrdata/ComfyUI-Manager.git
+    git clone https://github.com/theUpsider/ComfyUI-Logic.git
 
 # Устанавливаем зависимости для самих нод (если они есть)
 RUN if [ -f /comfyui/custom_nodes/ComfyUI-Custom-Scripts/requirements.txt ]; then pip install -r /comfyui/custom_nodes/ComfyUI-Custom-Scripts/requirements.txt; fi
