@@ -1,23 +1,23 @@
-# Используем стабильную версию образа
 FROM timpietruskyblibla/runpod-worker-comfy:3.4.0-base
 
-WORKDIR /
+WORKDIR /app
 
-# --- УСТАНОВКА КАСТОМНЫХ НОД ---
-# Клонируем репозитории напрямую в папку custom_nodes образа
-# Устанавливаем git, создаем папку и клонируем ноды
-RUN apt-get update && apt-get install -y git && \
-    mkdir -p /comfyui/custom_nodes && \
-    cd /comfyui/custom_nodes && \
-    git clone https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git && \
-    git clone https://github.com/theUpsider/ComfyUI-Logic.git
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
 
-# Устанавливаем зависимости для самих нод (если они есть)
-RUN if [ -f /comfyui/custom_nodes/ComfyUI-Custom-Scripts/requirements.txt ]; then pip install -r /comfyui/custom_nodes/ComfyUI-Custom-Scripts/requirements.txt; fi
+RUN mkdir -p /comfyui/custom_nodes \
+ && cd /comfyui/custom_nodes \
+ && [ -d "ComfyUI-Custom-Scripts" ] || git clone --depth 1 https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git \
+ && [ -d "ComfyUI-Logic" ] || git clone --depth 1 https://github.com/theUpsider/ComfyUI-Logic.git
 
-COPY . .
+RUN if [ -f /comfyui/custom_nodes/ComfyUI-Custom-Scripts/requirements.txt ]; then \
+      pip install --no-cache-dir -r /comfyui/custom_nodes/ComfyUI-Custom-Scripts/requirements.txt; \
+    fi
 
-# Твои зависимости для бота
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY . /app
 
 CMD ["/start.sh"]
